@@ -73,7 +73,6 @@ def halfcheetah_config() -> PPOConfig:
         env_name="HalfCheetah-v5",
         num_envs=8,
         rollout_steps=2048,
-        total_timesteps=1_000_000,
         normalize_obs=True,
     )
 
