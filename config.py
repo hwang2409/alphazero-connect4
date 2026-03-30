@@ -30,7 +30,7 @@ class Config:
     lr_gamma: float = 0.1
     weight_decay: float = 1e-4
     replay_buffer_size: int = 50_000
-    min_replay_size: int = 2_000
+    min_replay_size: int = 1_000
 
     # Evaluation
     eval_games: int = 40

@@ -87,11 +87,13 @@ def train(config: Config | None = None):
     for iteration in range(1, config.num_iterations + 1):
         iter_start = time.time()
 
-        # Self-play
+        # Self-play (on CPU — single-sample inference is faster without CUDA overhead)
         print(f"\n--- Iteration {iteration}/{config.num_iterations} ---")
         print(f"Generating {config.games_per_iteration} self-play games...")
         sp_start = time.time()
-        examples = generate_self_play_data(model, config, device=device)
+        model.cpu()
+        examples = generate_self_play_data(model, config, device="cpu")
+        model.to(device)
         sp_time = time.time() - sp_start
         replay_buffer.add(examples)
         print(f"  Self-play: {format_time(sp_time)} | "
@@ -133,7 +135,9 @@ def train(config: Config | None = None):
         # Evaluate every 5 iterations (and on the last one)
         if iteration % 5 == 0 or iteration == config.num_iterations:
             print("  Evaluating...")
-            evaluate_against_baselines(model, config, device=device)
+            model.cpu()
+            evaluate_against_baselines(model, config, device="cpu")
+            model.to(device)
 
         # Save checkpoint
         checkpoint = {
