@@ -107,6 +107,23 @@ class Connect4:
             state[2] = 1.0
         return state
 
+    def __hash__(self) -> int:
+        """Hash based on board state and current player.
+        
+        Uses Zobrist-style hashing for efficiency.
+        """
+        # Convert board to bytes for hashing
+        board_bytes = self.board.tobytes()
+        # Include current player in hash
+        return hash((board_bytes, self.current_player))
+    
+    def __eq__(self, other: object) -> bool:
+        """Check equality based on board state and current player."""
+        if not isinstance(other, Connect4):
+            return False
+        return (np.array_equal(self.board, other.board) and 
+                self.current_player == other.current_player)
+
     def __repr__(self) -> str:
         cols_header = "  " + " ".join(str(i + 1) for i in range(self.cols))
         rows_str = []

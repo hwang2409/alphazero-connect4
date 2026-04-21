@@ -197,3 +197,35 @@ class TestRepr:
         s = repr(g)
         assert "X" in s
         assert "." in s
+
+
+class TestHashAndEquality:
+    def test_same_position_same_hash(self):
+        # Two ways to reach same position
+        g1 = Connect4().make_move(0).make_move(1).make_move(2).make_move(3)
+        g2 = Connect4().make_move(2).make_move(3).make_move(0).make_move(1)
+        assert hash(g1) == hash(g2)
+        assert g1 == g2
+    
+    def test_different_player_different_hash(self):
+        g1 = Connect4().make_move(0)  # player -1 to move
+        g2 = Connect4().make_move(0).make_move(1).make_move(1)  # player -1 to move, different board
+        assert g1.current_player == g2.current_player
+        assert hash(g1) != hash(g2)
+        assert g1 != g2
+    
+    def test_same_board_different_player(self):
+        # Empty board but different current player
+        g1 = Connect4()  # player 1 to move
+        g2 = Connect4().make_move(0).make_move(0)  # back to empty col 0, player 1 to move
+        # Actually this creates a non-empty board, let me fix
+        g3 = Connect4()
+        g3.current_player = -1  # manually change player
+        assert hash(g1) != hash(g3)
+        assert g1 != g3
+    
+    def test_equality_with_non_connect4(self):
+        g = Connect4()
+        assert g != "not a game"
+        assert g != 42
+        assert g != None

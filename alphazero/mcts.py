@@ -73,6 +73,51 @@ def _expand(node: Node, policy: np.ndarray) -> None:
     node.is_expanded = True
 
 
+def _expand_with_transpositions(node: Node, policy: np.ndarray, 
+                               transposition_table: dict[int, Node]) -> None:
+    """Create child nodes, reusing existing nodes from transposition table."""
+    valid = node.state.get_valid_moves()
+
+    # Mask invalid moves and renormalize
+    policy = policy * valid
+    policy_sum = policy.sum()
+    if policy_sum > 0:
+        policy = policy / policy_sum
+    else:
+        # Fallback: uniform over valid moves
+        policy = valid.astype(np.float32) / valid.sum()
+
+    for action in range(len(valid)):
+        if valid[action]:
+            child_state = node.state.make_move(action)
+            state_hash = hash(child_state)
+            
+            # Check if this position already exists in transposition table
+            if state_hash in transposition_table:
+                # Reuse existing node
+                child = transposition_table[state_hash]
+                # Update prior with weighted average if node was reached before
+                if child.parent is not None:
+                    # Average priors weighted by parent visit counts
+                    old_weight = child.parent.visit_count
+                    new_weight = node.visit_count + 1
+                    total_weight = old_weight + new_weight
+                    child.prior = (child.prior * old_weight + policy[action] * new_weight) / total_weight
+            else:
+                # Create new node and add to transposition table
+                child = Node(
+                    state=child_state,
+                    parent=node,
+                    action=action,
+                    prior=policy[action],
+                )
+                transposition_table[state_hash] = child
+            
+            node.children[action] = child
+    
+    node.is_expanded = True
+
+
 def _backpropagate(node: Node, value: float) -> None:
     """Propagate the value up the tree, negating at each level.
 
@@ -92,18 +137,40 @@ def _backpropagate(node: Node, value: float) -> None:
 def search(state: Connect4, model: AlphaZeroNet, num_simulations: int,
            c_puct: float = 1.5, dirichlet_alpha: float = 1.0,
            dirichlet_epsilon: float = 0.25, add_noise: bool = True,
-           device: str = "cpu") -> tuple[np.ndarray, float]:
+           device: str = "cpu", transposition_table: dict[int, Node] | None = None) -> tuple[np.ndarray, float]:
     """Run MCTS from the given state.
+
+    Args:
+        state: Current game state
+        model: Neural network for policy and value estimates
+        num_simulations: Number of MCTS simulations to run
+        c_puct: Exploration constant
+        dirichlet_alpha: Alpha parameter for Dirichlet noise
+        dirichlet_epsilon: Weight for Dirichlet noise
+        add_noise: Whether to add exploration noise to root
+        device: Device for neural network inference
+        transposition_table: Optional dict to store/reuse nodes for transpositions
 
     Returns:
         action_probs: visit count distribution over actions, shape (cols,)
         root_value: estimated value of the root position
     """
-    root = Node(state)
+    # Initialize transposition table if not provided
+    if transposition_table is None:
+        transposition_table = {}
+    
+    # Check if root position is already in transposition table
+    state_hash = hash(state)
+    if state_hash in transposition_table:
+        root = transposition_table[state_hash]
+    else:
+        root = Node(state)
+        transposition_table[state_hash] = root
 
-    # Expand root with neural net
-    policy, value = model.predict(state, device=device)
-    _expand(root, policy)
+    # Expand root with neural net if not already expanded
+    if not root.is_expanded:
+        policy, value = model.predict(state, device=device)
+        _expand_with_transpositions(root, policy, transposition_table)
 
     # Add Dirichlet noise to root for exploration
     if add_noise:
@@ -130,7 +197,7 @@ def search(state: Connect4, model: AlphaZeroNet, num_simulations: int,
 
         # EXPAND + EVALUATE
         policy, value = model.predict(node.state, device=device)
-        _expand(node, policy)
+        _expand_with_transpositions(node, policy, transposition_table)
 
         # value is from current player's perspective at this node
         # backpropagate expects value from the perspective of the player who moved here

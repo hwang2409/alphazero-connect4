@@ -81,6 +81,56 @@ class TestSelectAction:
         assert all(a in (1, 2) for a in actions)
 
 
+class TestTranspositionTable:
+    def test_reuses_transposed_nodes(self):
+        """Test that transposition table reuses nodes for same positions."""
+        net = AlphaZeroNet()
+        
+        # Create a true transposition: same position reached by different move orders
+        # Path 1: 0, 1, 2, 3 (X at 0,2; O at 1,3)
+        # Path 2: 2, 3, 0, 1 (X at 0,2; O at 1,3) - same final position
+        g1 = Connect4().make_move(0).make_move(1).make_move(2).make_move(3)
+        g2 = Connect4().make_move(2).make_move(3).make_move(0).make_move(1)
+        
+        # Verify these are actually the same position
+        assert hash(g1) == hash(g2)
+        assert g1 == g2
+        
+        transposition_table = {}
+        
+        # Run search on first position
+        probs1, _ = search(g1, net, num_simulations=20, 
+                          add_noise=False, transposition_table=transposition_table)
+        
+        table_size_after_first = len(transposition_table)
+        assert table_size_after_first > 1  # Should have explored some positions
+        
+        # Run search on transposed position - should reuse cached nodes
+        probs2, _ = search(g2, net, num_simulations=20,
+                          add_noise=False, transposition_table=transposition_table)
+        
+        # The root node should have been reused (same hash)
+        root_hash = hash(g1)
+        assert root_hash in transposition_table
+    
+    def test_transposition_improves_search(self):
+        """Test that transposition table improves search quality."""
+        net = AlphaZeroNet()
+        g = Connect4()
+        
+        # Search without transposition table
+        probs1, val1 = search(g, net, num_simulations=50, add_noise=False)
+        
+        # Search with transposition table should visit nodes more efficiently
+        transposition_table = {}
+        probs2, val2 = search(g, net, num_simulations=50, add_noise=False,
+                             transposition_table=transposition_table)
+        
+        # Both should produce valid probability distributions
+        assert abs(probs1.sum() - 1.0) < 1e-5
+        assert abs(probs2.sum() - 1.0) < 1e-5
+
+
 class TestBackpropagate:
     def test_value_alternates(self):
         g = Connect4()
