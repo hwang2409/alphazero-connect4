@@ -36,6 +36,9 @@ def play_game(model: AlphaZeroNet, config: Config, device: str = "cpu") -> list[
             dirichlet_epsilon=config.dirichlet_epsilon,
             add_noise=True,
             device=device,
+            use_progressive_widening=config.use_progressive_widening,
+            c_pw=config.c_pw,
+            alpha_pw=config.alpha_pw,
         )
 
         history.append((game.encode(), action_probs, game.current_player))
