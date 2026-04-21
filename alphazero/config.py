@@ -18,6 +18,11 @@ class Config:
     dirichlet_alpha: float = 1.0
     dirichlet_epsilon: float = 0.25
     temperature_threshold: int = 15
+    
+    # Progressive widening
+    use_progressive_widening: bool = False
+    c_pw: float = 1.5
+    alpha_pw: float = 0.5
 
     # Training
     num_iterations: int = 40

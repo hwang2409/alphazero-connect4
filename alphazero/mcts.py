@@ -73,6 +73,61 @@ def _expand(node: Node, policy: np.ndarray) -> None:
     node.is_expanded = True
 
 
+def _expand_progressive(node: Node, policy: np.ndarray, c_pw: float = 1.5, alpha_pw: float = 0.5) -> None:
+    """Progressively expand children based on parent visit count.
+    
+    Only adds a subset of children initially, gradually adding more as the
+    parent node receives more visits. The number of children follows:
+    max_children = floor(c_pw * visit_count^alpha_pw)
+    
+    Args:
+        node: Node to expand
+        policy: Neural network policy output
+        c_pw: Progressive widening constant (controls expansion rate)
+        alpha_pw: Progressive widening exponent (typically 0.5)
+    """
+    valid = node.state.get_valid_moves()
+    valid_actions = np.where(valid)[0]
+    
+    # Mask invalid moves and renormalize
+    policy = policy * valid
+    policy_sum = policy.sum()
+    if policy_sum > 0:
+        policy = policy / policy_sum
+    else:
+        # Fallback: uniform over valid moves
+        policy = valid.astype(np.float32) / valid.sum()
+    
+    # Sort actions by policy probability (highest first)
+    sorted_actions = valid_actions[np.argsort(-policy[valid_actions])]
+    
+    # Calculate how many children we should have based on visit count
+    # Use max(1, visit_count) to ensure we add at least one child on first expansion
+    max_children = int(c_pw * (max(1, node.visit_count) ** alpha_pw))
+    max_children = min(max_children, len(valid_actions))  # Can't exceed valid moves
+    
+    # Determine which actions to add
+    existing = set(node.children.keys())
+    num_existing = len(existing)
+    num_to_add = max_children - num_existing
+    
+    if num_to_add > 0:
+        # Find actions we haven't added yet, in order of policy preference
+        actions_to_add = [a for a in sorted_actions if a not in existing][:num_to_add]
+        
+        for action in actions_to_add:
+            child_state = node.state.make_move(action)
+            node.children[action] = Node(
+                state=child_state,
+                parent=node,
+                action=action,
+                prior=policy[action],
+            )
+    
+    # Mark as fully expanded only when all valid moves have been added
+    node.is_expanded = len(node.children) == len(valid_actions)
+
+
 def _backpropagate(node: Node, value: float) -> None:
     """Propagate the value up the tree, negating at each level.
 
@@ -92,8 +147,22 @@ def _backpropagate(node: Node, value: float) -> None:
 def search(state: Connect4, model: AlphaZeroNet, num_simulations: int,
            c_puct: float = 1.5, dirichlet_alpha: float = 1.0,
            dirichlet_epsilon: float = 0.25, add_noise: bool = True,
-           device: str = "cpu") -> tuple[np.ndarray, float]:
+           device: str = "cpu", use_progressive_widening: bool = False,
+           c_pw: float = 1.5, alpha_pw: float = 0.5) -> tuple[np.ndarray, float]:
     """Run MCTS from the given state.
+
+    Args:
+        state: Current game state
+        model: Neural network for position evaluation
+        num_simulations: Number of MCTS simulations to run
+        c_puct: Exploration constant for UCB formula
+        dirichlet_alpha: Alpha parameter for Dirichlet noise
+        dirichlet_epsilon: Weight of Dirichlet noise vs prior
+        add_noise: Whether to add Dirichlet noise to root
+        device: Device for neural network inference
+        use_progressive_widening: Whether to use progressive widening
+        c_pw: Progressive widening constant (expansion rate)
+        alpha_pw: Progressive widening exponent (typically 0.5)
 
     Returns:
         action_probs: visit count distribution over actions, shape (cols,)
@@ -103,7 +172,10 @@ def search(state: Connect4, model: AlphaZeroNet, num_simulations: int,
 
     # Expand root with neural net
     policy, value = model.predict(state, device=device)
-    _expand(root, policy)
+    if use_progressive_widening:
+        _expand_progressive(root, policy, c_pw, alpha_pw)
+    else:
+        _expand(root, policy)
 
     # Add Dirichlet noise to root for exploration
     if add_noise:
@@ -130,7 +202,10 @@ def search(state: Connect4, model: AlphaZeroNet, num_simulations: int,
 
         # EXPAND + EVALUATE
         policy, value = model.predict(node.state, device=device)
-        _expand(node, policy)
+        if use_progressive_widening:
+            _expand_progressive(node, policy, c_pw, alpha_pw)
+        else:
+            _expand(node, policy)
 
         # value is from current player's perspective at this node
         # backpropagate expects value from the perspective of the player who moved here

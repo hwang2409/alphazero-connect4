@@ -145,6 +145,9 @@ class MCTSAgent:
             c_puct=self.config.c_puct,
             add_noise=False,
             device=self.device,
+            use_progressive_widening=self.config.use_progressive_widening,
+            c_pw=self.config.c_pw,
+            alpha_pw=self.config.alpha_pw,
         )
         return int(np.argmax(probs))
 
