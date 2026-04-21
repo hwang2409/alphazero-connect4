@@ -18,6 +18,10 @@ class Config:
     dirichlet_alpha: float = 1.0
     dirichlet_epsilon: float = 0.25
     temperature_threshold: int = 15
+    # Parallel MCTS settings
+    use_parallel_mcts: bool = False
+    mcts_batch_size: int = 8
+    virtual_loss: int = 3
 
     # Training
     num_iterations: int = 40

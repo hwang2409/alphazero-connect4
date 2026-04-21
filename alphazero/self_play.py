@@ -8,6 +8,7 @@ from config import Config
 from game import Connect4
 from model import AlphaZeroNet
 from mcts import search, select_action
+from mcts_parallel import search_parallel
 
 
 @dataclass
@@ -17,7 +18,7 @@ class TrainingExample:
     value: float            # from current player's perspective
 
 
-def play_game(model: AlphaZeroNet, config: Config, device: str = "cpu") -> list[TrainingExample]:
+def play_game(model: AlphaZeroNet, config: Config, device: str = "cpu", use_parallel: bool = False) -> list[TrainingExample]:
     """Play a single self-play game and return training examples."""
     game = Connect4(config.rows, config.cols, config.win_length)
     history: list[tuple[np.ndarray, np.ndarray, int]] = []
@@ -28,15 +29,29 @@ def play_game(model: AlphaZeroNet, config: Config, device: str = "cpu") -> list[
             break
 
         temp = 1.0 if game.move_count < config.temperature_threshold else 0.01
-        action_probs, _ = search(
-            game, model,
-            num_simulations=config.num_simulations,
-            c_puct=config.c_puct,
-            dirichlet_alpha=config.dirichlet_alpha,
-            dirichlet_epsilon=config.dirichlet_epsilon,
-            add_noise=True,
-            device=device,
-        )
+        
+        if use_parallel and hasattr(config, 'mcts_batch_size'):
+            action_probs, _ = search_parallel(
+                game, model,
+                num_simulations=config.num_simulations,
+                batch_size=config.mcts_batch_size,
+                c_puct=config.c_puct,
+                dirichlet_alpha=config.dirichlet_alpha,
+                dirichlet_epsilon=config.dirichlet_epsilon,
+                add_noise=True,
+                device=device,
+                virtual_loss=getattr(config, 'virtual_loss', 3),
+            )
+        else:
+            action_probs, _ = search(
+                game, model,
+                num_simulations=config.num_simulations,
+                c_puct=config.c_puct,
+                dirichlet_alpha=config.dirichlet_alpha,
+                dirichlet_epsilon=config.dirichlet_epsilon,
+                add_noise=True,
+                device=device,
+            )
 
         history.append((game.encode(), action_probs, game.current_player))
         action = select_action(action_probs, temperature=temp)
@@ -74,7 +89,7 @@ def play_game(model: AlphaZeroNet, config: Config, device: str = "cpu") -> list[
 
 def _worker_play_games(args: tuple) -> list[TrainingExample]:
     """Worker function for multiprocessing. Reconstructs model from state_dict."""
-    state_dict, config, num_games = args
+    state_dict, config, num_games, use_parallel = args
     torch.set_num_threads(1)  # avoid thread contention between workers
 
     model = AlphaZeroNet(
@@ -87,12 +102,12 @@ def _worker_play_games(args: tuple) -> list[TrainingExample]:
 
     all_examples = []
     for _ in range(num_games):
-        all_examples.extend(play_game(model, config, device="cpu"))
+        all_examples.extend(play_game(model, config, device="cpu", use_parallel=use_parallel))
     return all_examples
 
 
 def generate_self_play_data(model: AlphaZeroNet, config: Config,
-                            device: str = "cpu") -> list[TrainingExample]:
+                            device: str = "cpu", use_parallel_mcts: bool = False) -> list[TrainingExample]:
     """Generate self-play data for one iteration using parallel workers."""
     model.eval()
     state_dict = model.state_dict()
@@ -103,7 +118,7 @@ def generate_self_play_data(model: AlphaZeroNet, config: Config,
     for i in range(config.games_per_iteration % num_workers):
         games_per_worker[i] += 1
 
-    worker_args = [(state_dict, config, n) for n in games_per_worker]
+    worker_args = [(state_dict, config, n, use_parallel_mcts) for n in games_per_worker]
 
     with mp.Pool(num_workers) as pool:
         results = pool.map(_worker_play_games, worker_args)

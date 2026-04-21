@@ -6,6 +6,7 @@ from config import Config
 from game import Connect4
 from model import AlphaZeroNet
 from mcts import search
+from mcts_parallel import search_parallel
 
 
 # --- Baseline agents ---
@@ -139,13 +140,24 @@ class MCTSAgent:
         self.device = device
 
     def select_action(self, game: Connect4) -> int:
-        probs, _ = search(
-            game, self.model,
-            num_simulations=self.config.eval_simulations,
-            c_puct=self.config.c_puct,
-            add_noise=False,
-            device=self.device,
-        )
+        if self.config.use_parallel_mcts and hasattr(self.config, 'mcts_batch_size'):
+            probs, _ = search_parallel(
+                game, self.model,
+                num_simulations=self.config.eval_simulations,
+                batch_size=min(self.config.mcts_batch_size, self.config.eval_simulations),
+                c_puct=self.config.c_puct,
+                add_noise=False,
+                device=self.device,
+                virtual_loss=getattr(self.config, 'virtual_loss', 3),
+            )
+        else:
+            probs, _ = search(
+                game, self.model,
+                num_simulations=self.config.eval_simulations,
+                c_puct=self.config.c_puct,
+                add_noise=False,
+                device=self.device,
+            )
         return int(np.argmax(probs))
 
 

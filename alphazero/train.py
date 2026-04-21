@@ -92,7 +92,8 @@ def train(config: Config | None = None):
         print(f"Generating {config.games_per_iteration} self-play games...")
         sp_start = time.time()
         model.cpu()
-        examples = generate_self_play_data(model, config, device="cpu")
+        examples = generate_self_play_data(model, config, device="cpu", 
+                                           use_parallel_mcts=config.use_parallel_mcts)
         model.to(device)
         sp_time = time.time() - sp_start
         replay_buffer.add(examples)
