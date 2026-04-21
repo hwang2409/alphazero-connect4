@@ -145,6 +145,7 @@ class MCTSAgent:
             c_puct=self.config.c_puct,
             add_noise=False,
             device=self.device,
+            fpu_value=self.config.fpu_value,
         )
         return int(np.argmax(probs))
 

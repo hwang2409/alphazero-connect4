@@ -18,6 +18,7 @@ class Config:
     dirichlet_alpha: float = 1.0
     dirichlet_epsilon: float = 0.25
     temperature_threshold: int = 15
+    fpu_value: float = -0.1  # First Play Urgency - value for unvisited nodes
 
     # Training
     num_iterations: int = 40

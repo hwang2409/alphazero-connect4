@@ -28,19 +28,38 @@ class Node:
         return self.value_sum / self.visit_count
 
 
-def _ucb_score(parent: Node, child: Node, c_puct: float) -> float:
-    """Upper confidence bound for tree selection."""
+def _ucb_score(parent: Node, child: Node, c_puct: float, fpu_value: float = 0.0) -> float:
+    """Upper confidence bound for tree selection.
+    
+    Args:
+        parent: Parent node
+        child: Child node to evaluate
+        c_puct: Exploration constant
+        fpu_value: First Play Urgency value for unvisited nodes
+    """
+    if child.visit_count == 0:
+        # Use FPU value instead of Q=0 for unvisited nodes
+        q_value = fpu_value
+    else:
+        q_value = child.q_value
+    
     exploration = c_puct * child.prior * math.sqrt(parent.visit_count) / (1 + child.visit_count)
-    return child.q_value + exploration
+    return q_value + exploration
 
 
-def _select_child(node: Node, c_puct: float) -> tuple[int, Node]:
-    """Select the child with highest UCB score."""
+def _select_child(node: Node, c_puct: float, fpu_value: float = 0.0) -> tuple[int, Node]:
+    """Select the child with highest UCB score.
+    
+    Args:
+        node: Parent node
+        c_puct: Exploration constant
+        fpu_value: First Play Urgency value for unvisited nodes
+    """
     best_score = -float("inf")
     best_action = -1
     best_child = None
     for action, child in node.children.items():
-        score = _ucb_score(node, child, c_puct)
+        score = _ucb_score(node, child, c_puct, fpu_value)
         if score > best_score:
             best_score = score
             best_action = action
@@ -92,8 +111,19 @@ def _backpropagate(node: Node, value: float) -> None:
 def search(state: Connect4, model: AlphaZeroNet, num_simulations: int,
            c_puct: float = 1.5, dirichlet_alpha: float = 1.0,
            dirichlet_epsilon: float = 0.25, add_noise: bool = True,
-           device: str = "cpu") -> tuple[np.ndarray, float]:
+           device: str = "cpu", fpu_value: float = -0.1) -> tuple[np.ndarray, float]:
     """Run MCTS from the given state.
+
+    Args:
+        state: Current game state
+        model: Neural network for position evaluation
+        num_simulations: Number of MCTS simulations to run
+        c_puct: Exploration constant for UCB formula
+        dirichlet_alpha: Alpha parameter for Dirichlet noise
+        dirichlet_epsilon: Weight for Dirichlet noise (vs prior)
+        add_noise: Whether to add exploration noise at root
+        device: Device for neural net inference
+        fpu_value: First Play Urgency - value for unvisited nodes (default -0.1)
 
     Returns:
         action_probs: visit count distribution over actions, shape (cols,)
@@ -118,7 +148,7 @@ def search(state: Connect4, model: AlphaZeroNet, num_simulations: int,
 
         # SELECT: walk down tree until we find an unexpanded node or terminal
         while node.is_expanded and node.children:
-            _, node = _select_child(node, c_puct)
+            _, node = _select_child(node, c_puct, fpu_value)
 
         # Check if terminal
         terminal, terminal_reward = node.state.is_terminal()
