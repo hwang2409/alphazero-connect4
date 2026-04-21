@@ -2,14 +2,14 @@ import numpy as np
 
 from game import Connect4
 from model import AlphaZeroNet
-from mcts import search, select_action, Node, _expand, _backpropagate
+from mcts import search, select_action, Node, _expand, _backpropagate, get_child_node
 
 
 class TestMCTSBasics:
     def test_returns_valid_distribution(self):
         net = AlphaZeroNet()
         g = Connect4()
-        probs, value = search(g, net, num_simulations=20, add_noise=False)
+        probs, value, root = search(g, net, num_simulations=20, add_noise=False)
         assert probs.shape == (7,)
         assert abs(probs.sum() - 1.0) < 1e-5
         assert (probs >= 0).all()
@@ -22,7 +22,7 @@ class TestMCTSBasics:
         _expand(root, policy)
 
         # Run full search to verify
-        probs, _ = search(g, net, num_simulations=50, add_noise=False)
+        probs, _, _ = search(g, net, num_simulations=50, add_noise=False)
         # All probability should be on valid moves
         valid = g.get_valid_moves()
         assert all(probs[i] == 0 for i in range(7) if not valid[i])
@@ -33,7 +33,7 @@ class TestMCTSBasics:
         # Fill column 0
         for _ in range(6):
             g = g.make_move(0)
-        probs, _ = search(g, net, num_simulations=30, add_noise=False)
+        probs, _, _ = search(g, net, num_simulations=30, add_noise=False)
         assert probs[0] == 0.0
 
 
@@ -50,7 +50,7 @@ class TestForcedMoves:
         # Now player 1: has 3 in a row, col 3 wins
 
         net = AlphaZeroNet()
-        probs, _ = search(g, net, num_simulations=200, add_noise=False)
+        probs, _, _ = search(g, net, num_simulations=200, add_noise=False)
         assert np.argmax(probs) == 3
 
     def test_blocks_opponent_win(self):
@@ -62,7 +62,7 @@ class TestForcedMoves:
         # Player 1 to move, must block col 3
 
         net = AlphaZeroNet()
-        probs, _ = search(g, net, num_simulations=200, add_noise=False)
+        probs, _, _ = search(g, net, num_simulations=200, add_noise=False)
         assert np.argmax(probs) == 3
 
 
@@ -96,3 +96,59 @@ class TestBackpropagate:
         assert child.value_sum == 1.0
         assert root.visit_count == 1
         assert root.value_sum == -1.0  # negated
+
+
+class TestTreeReuse:
+    def test_get_child_node(self):
+        g = Connect4()
+        net = AlphaZeroNet()
+        
+        # Run initial search
+        probs, _, root = search(g, net, num_simulations=50, add_noise=False)
+        assert root.visit_count == 50  # 50 simulations
+        
+        # Take action 3
+        action = 3
+        child = get_child_node(root, action)
+        assert child is not None
+        assert child.parent is None  # Detached from parent
+        assert child.action == action  # Still has the action it was created with
+        
+        # Child should have some visits from the search
+        assert child.visit_count > 0
+        
+    def test_tree_reuse_preserves_visits(self):
+        g = Connect4()
+        net = AlphaZeroNet()
+        
+        # Run initial search
+        probs1, _, root1 = search(g, net, num_simulations=100, add_noise=False)
+        
+        # Take the most visited action
+        action = int(np.argmax(probs1))
+        child = get_child_node(root1, action)
+        initial_visits = child.visit_count
+        
+        # Make the move in the game
+        g2 = g.make_move(action)
+        
+        # Run search with reused tree
+        probs2, _, root2 = search(g2, net, num_simulations=50, add_noise=False, root=child)
+        
+        # The root should have initial visits + new simulations
+        assert root2.visit_count == initial_visits + 50  # 50 simulations
+        
+    def test_tree_reuse_wrong_state_raises(self):
+        g = Connect4()
+        net = AlphaZeroNet()
+        
+        # Get a root from one state
+        _, _, root = search(g, net, num_simulations=10, add_noise=False)
+        
+        # Try to use it with a different state
+        g2 = g.make_move(0)
+        try:
+            search(g2, net, num_simulations=10, add_noise=False, root=root)
+            assert False, "Should have raised assertion error"
+        except AssertionError as e:
+            assert "Root state doesn't match" in str(e)

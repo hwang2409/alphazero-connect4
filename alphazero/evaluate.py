@@ -5,7 +5,7 @@ import numpy as np
 from config import Config
 from game import Connect4
 from model import AlphaZeroNet
-from mcts import search
+from mcts import search, get_child_node
 
 
 # --- Baseline agents ---
@@ -137,16 +137,21 @@ class MCTSAgent:
         self.model = model
         self.config = config
         self.device = device
+        self.root = None  # Track root node for tree reuse
 
     def select_action(self, game: Connect4) -> int:
-        probs, _ = search(
+        probs, _, self.root = search(
             game, self.model,
             num_simulations=self.config.eval_simulations,
             c_puct=self.config.c_puct,
             add_noise=False,
             device=self.device,
+            root=self.root,  # Reuse previous search tree
         )
-        return int(np.argmax(probs))
+        action = int(np.argmax(probs))
+        # Get the child node for tree reuse in next search
+        self.root = get_child_node(self.root, action) if self.root else None
+        return action
 
 
 # --- Evaluation ---

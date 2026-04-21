@@ -7,7 +7,7 @@ import torch
 from config import Config
 from game import Connect4
 from model import AlphaZeroNet
-from mcts import search, select_action
+from mcts import search, select_action, get_child_node
 
 
 @dataclass
@@ -21,6 +21,7 @@ def play_game(model: AlphaZeroNet, config: Config, device: str = "cpu") -> list[
     """Play a single self-play game and return training examples."""
     game = Connect4(config.rows, config.cols, config.win_length)
     history: list[tuple[np.ndarray, np.ndarray, int]] = []
+    root = None  # Track root node for tree reuse
 
     while True:
         terminal, _ = game.is_terminal()
@@ -28,7 +29,7 @@ def play_game(model: AlphaZeroNet, config: Config, device: str = "cpu") -> list[
             break
 
         temp = 1.0 if game.move_count < config.temperature_threshold else 0.01
-        action_probs, _ = search(
+        action_probs, _, new_root = search(
             game, model,
             num_simulations=config.num_simulations,
             c_puct=config.c_puct,
@@ -36,11 +37,15 @@ def play_game(model: AlphaZeroNet, config: Config, device: str = "cpu") -> list[
             dirichlet_epsilon=config.dirichlet_epsilon,
             add_noise=True,
             device=device,
+            root=root,  # Reuse previous search tree
         )
 
         history.append((game.encode(), action_probs, game.current_player))
         action = select_action(action_probs, temperature=temp)
         game = game.make_move(action)
+        
+        # Get the child node that corresponds to the action taken
+        root = get_child_node(new_root, action) if new_root else None
 
     # Determine game outcome
     _, result = game.is_terminal()

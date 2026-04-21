@@ -92,18 +92,36 @@ def _backpropagate(node: Node, value: float) -> None:
 def search(state: Connect4, model: AlphaZeroNet, num_simulations: int,
            c_puct: float = 1.5, dirichlet_alpha: float = 1.0,
            dirichlet_epsilon: float = 0.25, add_noise: bool = True,
-           device: str = "cpu") -> tuple[np.ndarray, float]:
+           device: str = "cpu", root: Node | None = None) -> tuple[np.ndarray, float, Node]:
     """Run MCTS from the given state.
+
+    Args:
+        state: Current game state
+        model: Neural network for policy and value estimates
+        num_simulations: Number of MCTS simulations to run
+        c_puct: Exploration constant
+        dirichlet_alpha: Alpha parameter for Dirichlet noise
+        dirichlet_epsilon: Mixing parameter for Dirichlet noise
+        add_noise: Whether to add Dirichlet noise to root
+        device: Device for neural network inference
+        root: Optional existing search tree root to reuse
 
     Returns:
         action_probs: visit count distribution over actions, shape (cols,)
         root_value: estimated value of the root position
+        root: the root node (for potential reuse)
     """
-    root = Node(state)
+    if root is None:
+        root = Node(state)
+    else:
+        # Verify the root matches the state
+        assert root.state.board.tolist() == state.board.tolist(), "Root state doesn't match provided state"
+        assert root.state.current_player == state.current_player, "Root player doesn't match"
 
-    # Expand root with neural net
-    policy, value = model.predict(state, device=device)
-    _expand(root, policy)
+    # Expand root with neural net if not already expanded
+    if not root.is_expanded:
+        policy, value = model.predict(state, device=device)
+        _expand(root, policy)
 
     # Add Dirichlet noise to root for exploration
     if add_noise:
@@ -149,7 +167,21 @@ def search(state: Connect4, model: AlphaZeroNet, num_simulations: int,
         action_probs /= total
 
     root_value = root.q_value
-    return action_probs, root_value
+    return action_probs, root_value, root
+
+
+def get_child_node(root: Node, action: int) -> Node | None:
+    """Get the child node after taking an action, detaching it from parent.
+    
+    This allows reusing the subtree in the next search.
+    """
+    if action not in root.children:
+        return None
+    
+    child = root.children[action]
+    # Detach from parent to make it a new root
+    child.parent = None
+    return child
 
 
 def select_action(action_probs: np.ndarray, temperature: float) -> int:
